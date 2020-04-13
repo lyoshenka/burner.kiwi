@@ -59,12 +59,12 @@ func (s *SMTPMail) Start(websiteAddr string, db burner.Database, r *mux.Router, 
 		if s.listener != nil {
 			err := s.srv.Serve(*s.listener)
 			if err != nil {
-				log.Fatalf("SMTPMail: failed to start server: %v", err)
+				log.WithError(err).Fatal("smtpmail: failed to start server")
 			}
 		} else {
 			err := s.srv.ListenAndServe()
 			if err != nil {
-				log.Fatalf("SMTPMail: failed to start server: %v", err)
+				log.WithError(err).Fatal("smtpmail: failed to start server")
 			}
 		}
 	}()
@@ -101,14 +101,14 @@ func (h *handler) handler(req *smtpsrv.Request) error {
 	cType, params, err := mime.ParseMediaType(cTypeHeader)
 	if err != nil {
 		log.WithError(err).WithField("content-type-header", cTypeHeader).Error("smtpmail.handler: failed to parse message media type")
-		return fmt.Errorf("SMTP.handler: failed to parse message media type: %v", err)
+		return fmt.Errorf("smtp.handler: failed to parse message media type: %w", err)
 	}
 
 	if strings.HasPrefix(cType, "text/plain") {
 		bb, err := ioutil.ReadAll(req.Message.Body)
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to read email body")
-			return fmt.Errorf("SMTP.handler: failed to read email body: %v", err)
+			return fmt.Errorf("smtp.handler: failed to read text email body: %w", err)
 		}
 
 		partialMsg.BodyPlain = string(bytes.TrimSpace(bb))
@@ -116,13 +116,13 @@ func (h *handler) handler(req *smtpsrv.Request) error {
 		bb, err := ioutil.ReadAll(req.Message.Body)
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to read email body")
-			return fmt.Errorf("SMTP.handler: failed to read email body: %v", err)
+			return fmt.Errorf("smtp.handler: failed to read html email body: %w", err)
 		}
 
 		modifiedHTML, err := email.AddTargetBlank(string(bb))
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to AddTargetBlank")
-			return fmt.Errorf("SMTP.handler: failed to AddTargetBlank: %v", err)
+			return fmt.Errorf("smtp.handler: failed to AddTargetBlank: %w", err)
 		}
 
 		partialMsg.BodyHTML = modifiedHTML
@@ -130,7 +130,7 @@ func (h *handler) handler(req *smtpsrv.Request) error {
 		messageCopy, err := ioutil.ReadAll(req.Message.Body)
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to read email body for copy")
-			return fmt.Errorf("SMTP.handler: failed to read email body: %v", err)
+			return fmt.Errorf("smtp.handler: failed to read email body: %w", err)
 		}
 
 		copyReader := bytes.NewReader(messageCopy)
@@ -149,13 +149,13 @@ func (h *handler) handler(req *smtpsrv.Request) error {
 		inbox, err := h.db.GetInboxByAddress(rcpt)
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to retrieve inbox")
-			return fmt.Errorf("SMTP.handler: failed to retrieve inbox: %v", err)
+			return fmt.Errorf("smtp.handler: failed to retrieve inbox: %w", err)
 		}
 
 		mID, err := uuid.NewRandom()
 		if err != nil {
 			log.WithError(err).Printf("smtpmail.handler: failed to generate uuid for inbox")
-			return fmt.Errorf("SMTP.handler: failed to generate uuid for inbox: %v", err)
+			return fmt.Errorf("smtp.handler: failed to generate uuid for inbox: %w", err)
 		}
 
 		msg := partialMsg
@@ -166,7 +166,7 @@ func (h *handler) handler(req *smtpsrv.Request) error {
 		err = h.db.SaveNewMessage(msg)
 		if err != nil {
 			log.WithError(err).Error("smtpmail.handler: failed to save message to db")
-			return fmt.Errorf("SMTP.handler: failed to save message to db: %v", err)
+			return fmt.Errorf("smtp.handler: failed to save message to db: %w", err)
 		}
 	}
 
@@ -182,7 +182,7 @@ func extractParts(r io.Reader, boundary string) (string, string, error) {
 		if err == io.EOF {
 			return text, html, nil
 		} else if err != nil {
-			return "", "", fmt.Errorf("SMTP.handler: failed to failed to get next part: %v", err)
+			return "", "", fmt.Errorf("smtp.extractParts: failed to failed to get next part: %w", err)
 		}
 
 		cType := p.Header.Get("Content-Type")
@@ -195,7 +195,7 @@ func extractParts(r io.Reader, boundary string) (string, string, error) {
 			trimmed := bytes.TrimSpace(bb)
 			modifiedHTML, err := email.AddTargetBlank(string(trimmed))
 			if err != nil {
-				return "", "", fmt.Errorf("SMTP.handler: failed to AddTargetBlank: %v", err)
+				return "", "", fmt.Errorf("smtp.extractParts: failed to AddTargetBlank: %w", err)
 			}
 
 			html = modifiedHTML
@@ -207,7 +207,7 @@ func extractParts(r io.Reader, boundary string) (string, string, error) {
 			if err == io.ErrUnexpectedEOF {
 				return text, html, nil
 			}
-			return "", "", fmt.Errorf("SMTP.handler: failed to read email body: %v", err)
+			return "", "", fmt.Errorf("smtp.extractParts: failed to read email body: %w", err)
 		}
 	}
 }
@@ -218,7 +218,7 @@ func decodeWord(word string) (string, error) {
 	if strings.HasPrefix(word, "=?") {
 		dec, err := wordDecoder.DecodeHeader(word)
 		if err != nil {
-			return "", errors.Wrap(err, "SMTP.decodeWord: failed to decode")
+			return "", errors.Wrap(err, "smtp.decodeWord: failed to decode")
 		}
 		return dec, nil
 	}
@@ -232,7 +232,7 @@ func (h *handler) addressable(user, address string) bool {
 
 	exists, err := h.db.EmailAddressExists(address)
 	if err != nil {
-		log.Printf("SMTPMail: failed to query if email exists: %v", err)
+		log.WithError(err).Printf("smtp.addressable: failed to query if email exists")
 		return false
 	}
 

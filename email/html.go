@@ -15,7 +15,7 @@ func AddTargetBlank(html string) (string, error) {
 	var doc *goquery.Document
 	doc, err := goquery.NewDocumentFromReader(sr)
 	if err != nil {
-		return "", fmt.Errorf("AddTargetBlank: failed to create goquery doc: %v", err)
+		return "", fmt.Errorf("addTargetBlank: failed to create goquery doc: %w", err)
 	}
 
 	doc.Find("a").Each(func(i int, s *goquery.Selection) {
@@ -25,7 +25,7 @@ func AddTargetBlank(html string) (string, error) {
 	var modifiedHTML string
 	modifiedHTML, err = doc.Html()
 	if err != nil {
-		return "", fmt.Errorf("AddTargetBlank: failed to get html doc: %v", err)
+		return "", fmt.Errorf("addTargetBlank: failed to get html doc: %w", err)
 	}
 
 	return modifiedHTML, nil

@@ -37,7 +37,7 @@ func TestMailgun_MailgunIncoming_Verified(t *testing.T) {
 	})
 
 	router := mux.NewRouter()
-	router.HandleFunc("/mg/incoming/{inboxID}/", m.mailgunIncoming)
+	router.HandleFunc("/mg/incoming/{inboxID}/", m.incoming)
 
 	httpServer := httptest.NewServer(router)
 
@@ -108,7 +108,7 @@ func TestMailgun_MailgunIncoming_Blacklisted(t *testing.T) {
 	})
 
 	router := mux.NewRouter()
-	router.HandleFunc("/mg/incoming/{inboxID}/", m.mailgunIncoming)
+	router.HandleFunc("/mg/incoming/{inboxID}/", m.incoming)
 
 	httpServer := httptest.NewServer(router)
 
@@ -133,7 +133,7 @@ func TestMailgun_MailgunIncoming_UnVerified(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
 
-	m.mailgunIncoming(rr, req)
+	m.incoming(rr, req)
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("TestServer_MailgunIncoming_UnVerified: expected status code: %v, got %v", http.StatusUnauthorized, rr.Code)

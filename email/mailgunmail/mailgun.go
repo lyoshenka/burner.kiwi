@@ -1,7 +1,7 @@
 package mailgunmail
 
 import (
-	"log"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/haydenwoodhead/burner.kiwi/burner"
 	"github.com/haydenwoodhead/burner.kiwi/email"
-	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
 	mailgun "gopkg.in/mailgun/mailgun-go.v1"
 )
 
@@ -32,12 +32,12 @@ func NewMailgunProvider(domain string, key string) *MailgunMail {
 
 	go func() {
 		for {
-			log.Printf("Mailgun: deleting expired routes")
+			log.Info("mailgun: deleting expired routes")
 			err := mg.deleteExpiredRoutes()
 			if err != nil {
-				log.Printf("Mailgun: failed to delete expired routes")
+				log.WithError(err).Error("mailgun: failed to delete expired routes")
 			}
-			log.Printf("Mailgun: deleted expired routes")
+			log.Info("mailgun: deleted expired routes")
 			time.Sleep(1 * time.Hour)
 		}
 	}()
@@ -50,7 +50,7 @@ func (m *MailgunMail) Start(websiteAddr string, db burner.Database, r *mux.Route
 	m.db = db
 	m.isBlacklisted = isBlackisted
 	m.websiteAddr = websiteAddr
-	r.HandleFunc("/mg/incoming/{inboxID}/", m.mailgunIncoming).Methods(http.MethodPost)
+	r.HandleFunc("/mg/incoming/{inboxID}/", m.incoming).Methods(http.MethodPost)
 	return nil
 }
 
@@ -68,21 +68,21 @@ func (m *MailgunMail) RegisterRoute(i burner.Inbox) (string, error) {
 		Expression:  "match_recipient(\"" + i.Address + "\")",
 		Actions:     []string{"forward(\"" + routeAddr + "\")", "store()", "stop()"},
 	})
-	return route.ID, errors.Wrap(err, "createRoute: failed to create mailgun route")
+	return route.ID, fmt.Errorf("createRoute: failed to create mailgun route: %w", err)
 }
 
 func (m *MailgunMail) deleteExpiredRoutes() error {
 	_, rs, err := m.mg.GetRoutes(1000, 0)
 
 	if err != nil {
-		return errors.Wrap(err, "Mailgun.DeleteExpiredRoutes: failed to get routes")
+		return fmt.Errorf("mailgun.DeleteExpiredRoutes: failed to get routes: %w", err)
 	}
 
 	for _, r := range rs {
 		tInt, err := strconv.ParseInt(r.Description, 10, 64)
 
 		if err != nil {
-			log.Printf("Mailgun.DeleteExpiredRoutes: failed to parse route description as int: id=%v\n", r.ID)
+			log.WithField("routeID", r.ID).Error("mailgun.DeleteExpiredRoutes: failed to parse route description as int")
 			continue
 		}
 
@@ -93,7 +93,7 @@ func (m *MailgunMail) deleteExpiredRoutes() error {
 			err := m.mg.DeleteRoute(r.ID)
 
 			if err != nil {
-				log.Printf("Mailgun.DeleteExpiredRoutes: failed to delete route: id=%v\n", r.ID)
+				log.WithError(err).WithField("routeID", r.ID).Error("mailgun.DeleteExpiredRoutes: failed to delete route")
 				continue
 			}
 		}
@@ -102,16 +102,16 @@ func (m *MailgunMail) deleteExpiredRoutes() error {
 	return nil
 }
 
-func (m *MailgunMail) mailgunIncoming(w http.ResponseWriter, r *http.Request) {
-	ver, err := m.mg.VerifyWebhookRequest(r)
+func (m *MailgunMail) incoming(w http.ResponseWriter, r *http.Request) {
+	verified, err := m.mg.VerifyWebhookRequest(r)
 	if err != nil {
-		log.Printf("MailgunIncoming: failed to verify request: %v", err)
+		log.WithError(err).Debug("mailgun.incoming: failed to verify request")
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
-	if !ver {
-		log.Printf("MailgunIncoming: invalid request")
+	if !verified {
+		log.Debug("mailgun.incoming: request not verified")
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -127,7 +127,7 @@ func (m *MailgunMail) mailgunIncoming(w http.ResponseWriter, r *http.Request) {
 	i, err := m.db.GetInboxByID(id)
 
 	if err != nil {
-		log.Printf("MailgunIncoming: failed to get inbox: %v", err)
+		log.WithError(err).Error("mailgun.incoming: failed to get inbox")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -139,7 +139,7 @@ func (m *MailgunMail) mailgunIncoming(w http.ResponseWriter, r *http.Request) {
 
 	mID, err := uuid.NewRandom()
 	if err != nil {
-		log.Printf("MailgunIncoming: failed to generate uuid for inbox: %v", err)
+		log.WithError(err).Error("mailgun.incoming: failed to generate uuid for inbox")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -159,7 +159,7 @@ func (m *MailgunMail) mailgunIncoming(w http.ResponseWriter, r *http.Request) {
 	if html != "" {
 		modifiedHTML, err := email.AddTargetBlank(html)
 		if err != nil {
-			log.Printf("MailgunIncoming: failed to AddTargetBlank: %v", err)
+			log.WithError(err).Error("mailgun.incoming: failed to AddTargetBlank")
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -168,15 +168,15 @@ func (m *MailgunMail) mailgunIncoming(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = m.db.SaveNewMessage(msg)
-
 	if err != nil {
-		log.Printf("MailgunIncoming: failed to save message to db: %v", err)
+		log.WithError(err).Error("mailgun.incoming: failed to save message to db")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 
 	_, err = w.Write([]byte(id))
-
 	if err != nil {
-		log.Printf("MailgunIncoming: failed to write response: %v", err)
+		log.WithError(err).Warn("mailgun.incoming: failed to write response")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
